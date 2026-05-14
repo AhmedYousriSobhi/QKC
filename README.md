@@ -32,7 +32,7 @@ quantum-kernel-classification/
 
 ```bash
 # 1. Clone / download the repo
-git clone https://github.com/AhmedYousriSobhi/QLC
+git clone https://github.com/AhmedYousriSobhi/QKC
 cd QLC
 
 # 2. Create a virtual environment (recommended)
