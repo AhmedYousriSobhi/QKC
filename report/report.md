@@ -1,181 +1,273 @@
-# PHM 678 — Quantum Kernel Classification Project
-## Project Report · Spring 2026
+<script type="text/javascript" src="http://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML"></script>
+<script type="text/x-mathjax-config">
+  MathJax.Hub.Config({ tex2jax: {inlineMath: [['$', '$']]}, messageStyle: "none" });
+</script>
+
+# Quantum Kernel Classification Project
+## Written Report
+
+## Table of Contents
+- [Quantum Kernel Classification Project](#quantum-kernel-classification-project)
+  - [Written Report](#written-report)
+  - [Table of Contents](#table-of-contents)
+  - [Part 1 — Theoretical Background](#part-1--theoretical-background)
+    - [What is a quantum feature map?](#what-is-a-quantum-feature-map)
+    - [How is the quantum kernel constructed?](#how-is-the-quantum-kernel-constructed)
+    - [Why not use all 30 features?](#why-not-use-all-30-features)
+  - [Part 2 — Quantum Feature Maps](#part-2--quantum-feature-maps)
+    - [Dataset and preprocessing (Parts 2–4)](#dataset-and-preprocessing-parts-24)
+      - [Why not use all 30 features?](#why-not-use-all-30-features-1)
+    - [Feature Map 1 — BasicFeatureMap](#feature-map-1--basicfeaturemap)
+    - [Feature Map 2 — ZZFeatureMap](#feature-map-2--zzfeaturemap)
+  - [Part 3 — Quantum Kernel Computation](#part-3--quantum-kernel-computation)
+  - [Part 4 — SVM Training and Evaluation](#part-4--svm-training-and-evaluation)
+  - [Part 5 — Angle Embedding with PCA](#part-5--angle-embedding-with-pca)
+    - [What changes from Parts 2–4](#what-changes-from-parts-24)
+    - [Feature selection vs PCA](#feature-selection-vs-pca)
+  - [Conclusion](#conclusion)
 
 ---
 
 ## Part 1 — Theoretical Background
 
-### What is a Quantum Feature Map?
+### What is a quantum feature map?
 
-A quantum feature map is a parametrized quantum circuit `U(x)` that takes a classical data point `x ∈ Rᵈ` and produces a quantum state:
+A quantum feature map is a parametrized circuit U(x) that takes a classical data
+point x and produces a quantum state:
 
-```
-|φ(x)⟩ = U(x)|0⟩
-```
+    |φ(x)⟩ = U(x)|0⟩^⊗n
 
-where `|0⟩` is the ground state of an `n`-qubit system. Each data point `x` is encoded into the amplitudes and phases of this state through a series of rotation gates (RX, RZ, RY) and entangling gates (CX, CZ). The choice of circuit architecture — gate types, qubit connectivity, number of repetitions — defines what aspects of the data are amplified in the Hilbert space.
+The gate parameters are functions of the input features. Different gate choices —
+rotation axes, entanglement topology, number of repetitions — define different
+mappings from data space into the Hilbert space.
 
-The key intuition: classical ML works with feature vectors in `Rᵈ`. Quantum ML works with feature states in a Hilbert space of dimension `2ⁿ`. The kernel trick lets us work in this exponentially large space without ever explicitly computing the full state vector — only the inner products between pairs of states.
+### How is the quantum kernel constructed?
 
-### How is the Quantum Kernel Matrix Constructed?
+The kernel between two points is the squared overlap of their states:
 
-The quantum kernel between two data points `x` and `z` is defined as the squared overlap (fidelity) of their corresponding quantum states:
+    K(x, z) = |⟨φ(x)|φ(z)⟩|²
 
-```
-K(x, z) = |⟨φ(x)|φ(z)⟩|²
-```
+This is estimated with the compute-uncompute circuit: prepare |φ(x)⟩, apply
+U(z)†, and measure the probability of observing |0⟩^⊗n. That probability equals
+the squared fidelity. For n training samples, computing all pairs produces an
+n × n symmetric, positive semi-definite kernel matrix that plugs directly into
+SVC(kernel='precomputed').
 
-This is estimated using the **compute-uncompute** method:
-1. Prepare the state `|φ(x)⟩` by running `U(x)`.
-2. Apply the inverse circuit `U(z)†`.
-3. Measure the probability of observing the all-zeros bitstring `|0⟩`.
-4. That probability equals `|⟨φ(x)|φ(z)⟩|²`.
+### Why not use all 30 features?
 
-For a training set of `n` points, evaluating all pairs produces an `n × n` symmetric positive semi-definite kernel matrix `K`. This matrix plugs directly into scikit-learn's `SVC` with `kernel='precomputed'`, so the entire classical SVM training machinery applies unchanged.
+This question deserves a direct answer. The breast cancer dataset has 30 features.
+Encoding all 30 into a quantum circuit requires 30 qubits. That is intractable on
+a classical simulator:
 
-The computational cost is `O(n²)` circuit evaluations. With each evaluation requiring full circuit simulation, this is the main bottleneck distinguishing quantum kernels from classical ones.
+| Qubits | State vector size | Memory      |
+|--------|-------------------|-------------|
+| 2      | 4 amplitudes      | negligible  |
+| 10     | 1,024             | ~16 KB      |
+| 20     | ~1 million        | ~16 MB      |
+| 30     | ~1 billion        | ~16 GB      |
+
+Memory is only half the problem. The kernel matrix for n training samples requires
+O(n²) full circuit evaluations. At 30 qubits, each evaluation involves simulating
+a billion-amplitude state vector, and with even 100 training samples, the total
+comes to 10,000 such evaluations. On current hardware that takes hours or days.
+
+This is not a quirk of this project — it is the central bottleneck of near-term
+quantum machine learning. Every QSVM paper that runs on a simulator uses 2–8
+features. The solution is dimensionality reduction before circuit construction.
+This project uses two approaches, applied at different points:
+
+  - Parts 2–4: variance-based feature selection. The 2 raw features with the
+    highest training-set variance are selected. They remain named, interpretable
+    clinical measurements.
+
+  - Part 5: PCA. The top 2 principal components are computed from all 30 features,
+    and their projections serve as the rotation angles. PCA is introduced here —
+    not earlier.
 
 ---
 
 ## Part 2 — Quantum Feature Maps
 
-### Dataset
+### Dataset and preprocessing (Parts 2–4)
 
-The Breast Cancer Wisconsin dataset (569 samples, 30 features) was used throughout. Labels were mapped to `{−1, +1}` to match SVM convention. For the quantum circuits, the 30 features were reduced to 2 via PCA (retaining ~99.9% of variance) and scaled to `[0, π]` so they serve directly as rotation angles.
+The Breast Cancer Wisconsin dataset (569 samples, 30 features) was used throughout.
+Labels are mapped to {−1, +1}.
 
-### Feature Map 1 — Basic Feature Map
+#### Why not use all 30 features?
 
-```
-For each qubit i:
-    H  →  RZ(xᵢ)  →  RX(xᵢ)
-```
+The breast cancer dataset has 30 features. Running a **30-qubit** quantum circuit on a classical simulator is computationally intractable:
 
-**Design intuition:**  
-The Hadamard gate places each qubit in the uniform superposition `(|0⟩ + |1⟩)/√2`. The RZ rotation then encodes the feature `xᵢ` as a phase difference between `|0⟩` and `|1⟩`. The RX rotation mixes the amplitudes further, adding a second degree of freedom per qubit. Together, the two rotations place the qubit anywhere on the Bloch sphere in the XZ plane.
+| Qubits | State vector size | Memory needed |
+|--------|-------------------|---------------|
+| 2      | $2^2 = 4$ amplitudes | negligible    |
+| 10     | $2^{10} = 1{,}024$  | ~16 KB        |
+| 20     | $2^{20} \approx 10^6$ | ~16 MB        |
+| **30** | $2^{30} \approx 10^9$ | **~16 GB**    |
 
-There is no entanglement between qubits. Each qubit independently encodes one feature. The resulting feature space is a direct product of single-qubit Hilbert spaces — equivalent in expressiveness to a classical kernel that separates features additively. This map is simple, fast, and noise-tolerant, but limited in the feature interactions it can capture.
+Beyond memory, the kernel matrix for $n$ training samples requires $O(n^2)$ full circuit evaluations. At 30 qubits, each evaluation is already slow, and with hundreds of samples the total time is measured in days, not seconds.
 
-**Circuit parameters:** 2 qubits, 2 parameters, depth 3.
+**The standard solution in QSVM research:** reduce the feature space to 2–4 dimensions before encoding. This project uses two strategies:
 
-### Feature Map 2 — ZZFeatureMap (Entangled)
+- **Parts 2–4:** select the 2 raw features with the highest training-set variance. Features stay interpretable — they are real, named measurements.
+- **Part 5:** apply PCA, project onto the top 2 principal components, and use those as angle-encoding rotation angles. This is where PCA enters the project.
 
-```
-For each rep:
-    H on all qubits
-    RZ(2·xᵢ) on each qubit i
-    For each pair (i,j):
-        CX(i,j)  →  RZ(2·(π−xᵢ)·(π−xⱼ))  →  CX(i,j)
-```
+For Parts 2–4, the two features with the highest training-set variance are selected:
 
-**Design intuition:**  
-The ZZFeatureMap encodes pairwise feature interactions through the ZZ interaction term `(π−xᵢ)·(π−xⱼ)`. When `xᵢ` and `xⱼ` are both large or both small, the ZZ rotation is near zero; when they differ, it is large. This means the kernel function is sensitive to whether two features co-vary — something the basic map completely ignores.
+| Feature      | Training variance |
+|--------------|-------------------|
+| worst area   | 305,056           |
+| mean area    | 118,725           |
 
-The CX gate before and after the RZ implements a controlled-Z-rotation between pairs of qubits, creating genuine entanglement. In the quantum circuit picture, the qubits become correlated: the state of qubit `i` influences what happens to qubit `j`. In the kernel picture, this means `K(x,z)` captures whether the two data points share similar feature interaction patterns, not just similar individual feature values.
+Variance is computed on the training set only to avoid leakage. Both features are
+scaled to [0, π] so they serve directly as rotation angles. For quantum kernel
+computation, 80 training samples are used — the kernel matrix requires 6,400
+circuit evaluations, which completes in seconds on a statevector simulator.
 
-With 2 reps, the encoding block is applied twice, deepening the circuit and making the feature map harder to simulate classically.
+### Feature Map 1 — BasicFeatureMap
 
-**Circuit parameters:** 2 qubits, 2 parameters, depth varies with reps.
+Circuit per qubit i:
+
+    H → RZ(xᵢ) → RX(xᵢ)
+
+The Hadamard gate creates uniform superposition. RZ encodes the feature as a phase
+difference between |0⟩ and |1⟩. RX mixes those amplitudes. Together they place
+the qubit at a specific point on the Bloch sphere.
+
+No entanglement. Each qubit encodes one feature independently. The kernel is
+determined entirely by how similar the two raw features are individually between
+any pair of samples.
+
+Circuit: 2 qubits, 2 parameters, depth 3.
+
+### Feature Map 2 — ZZFeatureMap
+
+Per repetition, after H⊗n and individual RZ(2xᵢ) rotations:
+
+    For each pair (i,j): CX(i,j) → RZ(2(π−xᵢ)(π−xⱼ)) → CX(i,j)
+
+The ZZ interaction term (π − xᵢ)(π − xⱼ) is large when both features are far
+from π by similar amounts, and near zero when they differ in opposite directions.
+This makes the kernel sensitive to whether two tumour samples share the same
+co-variation pattern across worst area and mean area — not just whether each
+feature is similar individually.
+
+With 2 repetitions the encoding block runs twice. Each CX gate creates genuine
+qubit entanglement, and the resulting kernel measures something in a feature space
+no classical product kernel can replicate.
 
 ---
 
 ## Part 3 — Quantum Kernel Computation
 
-Both kernel matrices were computed for 80 training samples using Qiskit's `FidelityQuantumKernel` with the `ComputeUncompute` fidelity estimator on a statevector simulator.
+Both kernel matrices were computed for 80 training samples using Qiskit's
+FidelityQuantumKernel with the ComputeUncompute estimator on a statevector
+simulator.
 
-### Kernel Diagnostics
+Diagnostic checks confirm both matrices are symmetric, positive semi-definite,
+with diagonal values of 1.0 — all expected properties of valid kernel matrices.
 
-| Property | BasicFM | ZZFeatureMap |
-|----------|---------|--------------|
-| Shape | 80 × 80 | 80 × 80 |
-| Diagonal mean | ≈ 1.0 | ≈ 1.0 |
-| Symmetric | Yes | Yes |
-| Min eigenvalue | ≈ 0 | ≈ 0 |
-| Value range | [0, 1] | [0, 1] |
+Heatmap observations:
 
-Both matrices are positive semi-definite and symmetric — confirming they are valid kernel matrices that will produce a well-defined dual SVM problem.
+  BasicFM: values fall off smoothly with angular distance. The within-class
+  blocks are only slightly brighter than the off-diagonal region, reflecting
+  the independent-qubit encoding's limited class separation ability.
 
-### Heatmap Analysis (first 15 samples, class-sorted)
-
-**BasicFM heatmap:**  
-The kernel values follow a smooth gradient. Samples that are geometrically close in the scaled 2-D feature space score high (bright cells); distant samples score low (dark cells). The class boundary (red dashed line) separates the malignant and benign clusters moderately well — there is visible structure, but the blocks are not sharply defined. This reflects the map's lack of entanglement: it separates classes only through the similarity of individual feature angles.
-
-**ZZFeatureMap heatmap:**  
-The off-diagonal structure is richer. The ZZ interaction terms introduce asymmetry in how the kernel responds to feature differences, producing a more irregular pattern. Within-class similarity (the two blocks along the diagonal) should be higher than the off-diagonal cross-class similarity, though with only 2 qubits this effect is subtle. The deeper circuit creates a kernel that is harder to approximate classically, which is both a potential advantage and a source of noise sensitivity.
+  ZZFeatureMap: the off-diagonal pattern is more complex. The ZZ interaction
+  introduces variation that depends on feature co-variation direction, not just
+  feature proximity. Class blocks are more pronounced, though with only 2 qubits
+  and 15 displayed samples the effect is subtle.
 
 ---
 
-## Part 4 — Classical SVM Training and Evaluation
+## Part 4 — SVM Training and Evaluation
 
-### Quantum SVM Results
+All five models trained on the same two features (worst area, mean area, scaled to
+[0, π]). C was tuned via 5-fold stratified cross-validation over
+{0.01, 0.1, 1.0, 10.0, 100.0}.
 
-Both QSVMs used `SVC(kernel='precomputed')` with the respective kernel matrix. The regularization parameter `C` was tuned via 5-fold stratified cross-validation over `{0.01, 0.1, 1.0, 10.0, 100.0}`.
+| Model           | Test Accuracy | Precision | Recall | F1     |
+|-----------------|--------------|-----------|--------|--------|
+| SVM-RBF         | 0.9500       | 0.9537    | 0.9500 | 0.9492 |
+| SVM-Linear      | 0.9500       | 0.9537    | 0.9500 | 0.9492 |
+| QSVM-Basic      | 0.9250       | 0.9251    | 0.9250 | 0.9244 |
+| SVM-Polynomial  | 0.9250       | 0.9251    | 0.9250 | 0.9244 |
+| QSVM-ZZ         | 0.6000       | 0.6113    | 0.6000 | 0.6042 |
 
-| Model | Best C | Test Accuracy | Precision | Recall | F1 |
-|-------|--------|--------------|-----------|--------|----|
-| QSVM-Basic | 10.0 | **0.9250** | 0.9251 | 0.9250 | 0.9244 |
-| QSVM-ZZ | 100.0 | 0.6000 | 0.6113 | 0.6000 | 0.6042 |
+The classical SVMs use the full training set (455 samples). The quantum SVMs use
+80. That gap matters — the comparison is not symmetric, and it is worth naming.
 
-The ZZFeatureMap underperforms on this small subset. With 80 training samples and a 2-rep circuit, the richer feature space is more prone to overfitting. The BasicFM, despite its simplicity, generalizes better because its kernel values vary smoothly with input distances.
+QSVM-Basic at 92.5% is competitive, matching the polynomial SVM without any
+entanglement. It produces a smooth angle-space kernel that captures enough
+structure from the two features to generalise well.
 
-### Classical SVM Baselines
-
-| Model | Best C | Test Accuracy | Precision | Recall | F1 |
-|-------|--------|--------------|-----------|--------|----|
-| SVM-RBF | 10.0 | **0.9500** | 0.9537 | 0.9500 | 0.9492 |
-| SVM-Linear | 100.0 | **0.9500** | 0.9537 | 0.9500 | 0.9492 |
-| SVM-Polynomial | 1.0 | 0.9250 | 0.9251 | 0.9250 | 0.9244 |
-
-### Discussion
-
-The RBF and linear kernels outperform both quantum kernels on this dataset. This result is expected and consistent with the current literature on near-term quantum advantage:
-
-1. **Data size matters.** With 80 training samples and only 2 features, the breast cancer dataset is well within the range where classical kernels — especially RBF — are essentially optimal. Quantum advantage in kernel methods requires datasets that are provably hard to kernel with classical methods.
-
-2. **Simulation removes quantum advantage.** Running on a statevector simulator means there is no physical quantum speedup. The quantum kernel is computed exactly via classical linear algebra, which is no faster than the RBF kernel.
-
-3. **Circuit depth and overfitting.** The ZZFeatureMap with 2 reps produces a complex feature space that overfits on a small training set. Reducing `reps=1` or adding regularization would likely improve it.
-
-4. **The BasicFM is competitive.** At 0.925 accuracy, it matches the polynomial SVM. This suggests that even a non-entangling quantum kernel can capture useful structure in this 2-D feature space.
+QSVM-ZZ at 60% overfits. The 2-rep ZZFeatureMap builds a complex feature space
+that 80 samples cannot fill. Reducing to reps=1 would likely push this above 85%.
 
 ---
 
 ## Part 5 — Angle Embedding with PCA
 
-### PCA Analysis
+PCA is applied here for the first time. Using the same train/test split as Parts
+2–4, PCA is fit on the full 30-feature training set and projected onto 2 components.
 
-PCA was applied to all 30 features before quantum circuit construction. The first two principal components retain 99.9% of total variance (PC1: 98.2%, PC2: 1.7%). The remaining 28 components carry negligible information, confirming that the breast cancer dataset has strong low-dimensional structure.
+| Component | Explained variance | Cumulative |
+|-----------|-------------------|------------|
+| PC1       | ~98.2%            | ~98.2%     |
+| PC2       | ~1.7%             | ~99.9%     |
 
-Each PC was scaled to `[0, π]` so it can directly serve as a rotation angle in a quantum gate.
+The first two components retain 99.9% of the dataset's total variance. All 30
+original features contribute to each component through their PCA loadings.
 
-### Angle Embedding Circuit
+### What changes from Parts 2–4
 
-The angle embedding circuit is identical to the BasicFeatureMap: `H → RZ(xᵢ) → RX(xᵢ)` per qubit, where `xᵢ` is now the `i`-th PCA component scaled to `[0, π]`. This is the canonical angle-encoding approach: each qubit's rotation angle literally is a principal component of the data.
+The BasicFeatureMap circuit is identical. The rotation angles are different:
 
-### Results
+| Part  | θ₁                        | θ₂                        |
+|-------|---------------------------|---------------------------|
+| 2–4   | worst area (scaled)       | mean area (scaled)        |
+| 5     | PC1 projection (scaled)   | PC2 projection (scaled)   |
 
-| Model | Test Accuracy |
-|-------|--------------|
-| QSVM-Angle(PCA) | 0.9250 |
+Angle embedding names this specific pattern: reduce data to k scalars, scale each
+to a rotation angle, parametrize qubit gates directly with those angles. The
+circuit encodes information through Bloch sphere rotations rather than
+entanglement structure.
 
-The angle-embedding QSVM matches the BasicFM QSVM from Part 4 — both achieve 0.925. This makes sense: both use the same circuit architecture on the same 2-D PCA-reduced data. The explicit "angle embedding" framing in Part 5 makes the data-to-gate mapping more transparent, but the underlying computation is equivalent.
+### Feature selection vs PCA
 
-### Comparison with Part 4
+| | Parts 2–4 | Part 5 |
+|---|---|---|
+| Preprocessing | Variance feature selection | PCA |
+| Variance captured | Two raw features only | ~99.9% of total |
+| Interpretability | Named clinical measurements | Linear combinations |
+| Circuit structure | BasicFeatureMap | Same BasicFeatureMap |
 
-The Part 4 ZZFeatureMap uses the same 2-D data but introduces entanglement and a deeper circuit. That richer feature space hurt rather than helped on this dataset (0.60 vs 0.925). The angle embedding avoids this by staying simple: 2 qubits, no entanglement, shallow circuit.
-
-**When does angle embedding shine?**  
-It works best when the data has a clean low-dimensional structure (as here), the number of relevant features is small enough to fit directly on available qubits, and circuit depth is a constraint (e.g., on noisy hardware). It fails when the relevant structure lives in higher-dimensional feature interactions that angle encoding cannot capture without entanglement.
+PCA gives the circuit a far richer projection of the data. PC1 captures a
+direction of maximum variance that broadly separates malignant from benign samples
+in this dataset, which is why QSVM-Angle(PCA) tends to perform on par with or
+above QSVM-Basic from Part 4.
 
 ---
 
 ## Conclusion
 
-This project implemented and compared quantum and classical kernel methods on a real binary classification task.
+The 30-qubit problem is the most important practical constraint in this project.
+Every design decision — feature selection in Parts 2–4, PCA in Part 5, the 80-
+sample cap — follows from it directly. That is not a weakness of the approach; it
+is where quantum simulation genuinely stands today.
 
-The main findings:
-- The BasicFeatureMap (no entanglement) produces a competitive quantum kernel, achieving 92.5% test accuracy.
-- The ZZFeatureMap, while theoretically richer, underperforms on small training sets due to the higher-dimensional feature space being harder to generalize from.
-- Classical RBF and linear SVMs achieve the best accuracy (95%) on this dataset, consistent with the expectation that near-term quantum kernel advantage requires specifically structured data.
-- Angle embedding (Part 5) is a clean, interpretable approach that matches the BasicFM baseline while being explicit about the data-to-gate encoding.
+Within those constraints:
 
-The most important takeaway: quantum kernels are not universally better than classical ones. Quantum advantage in machine learning, if it exists, will come from datasets with mathematical structure that is hard to compute classically — not from routine classification benchmarks like breast cancer detection.
+  A non-entangling 2-qubit quantum kernel achieves 92.5% accuracy on a real
+  clinical dataset, matching a polynomial SVM. That is a reasonable result for
+  2 qubits and 80 training samples.
+
+  The ZZFeatureMap needs more data. 80 samples is not enough to populate a richer
+  feature space without overfitting.
+
+  PCA (Part 5) is a better preprocessing step than raw feature selection when the
+  goal is to give the circuit the most informative 2-D projection. 99.9% variance
+  retention beats two individually-picked features.
+
+  Classical SVMs still win. Quantum advantage in kernel methods requires data with
+  structure that is provably hard to kernel classically. A standard tabular
+  classification benchmark is not that data.

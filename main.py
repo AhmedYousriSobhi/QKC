@@ -1,8 +1,7 @@
 """
 main.py
 ───────
-PHM 678 — Quantum Kernel Classification Project
-Spring 2026
+Quantum Kernel Classification Project
 
 Run this file to execute all five project parts in sequence:
 
@@ -109,6 +108,25 @@ def part2(n_features: int = 2):
     print("  PART 2 — Quantum Feature Maps")
     print("═" * 60)
 
+    print("""
+### Why not use all 30 features?
+
+The breast cancer dataset has 30 features. Running a **30-qubit** quantum circuit on a classical simulator is computationally intractable:
+
+| Qubits | State vector size | Memory needed |
+|--------|-------------------|---------------|
+| 2 | $2^2 = 4$ amplitudes | negligible |
+| 10 | $2^{10} = 1{,}024$ | ~16 KB |
+| 20 | $2^{20} \approx 10^6$ | ~16 MB |
+| **30** | $2^{30} \approx 10^9$ | **~16 GB** |
+
+Beyond memory, the kernel matrix for $n$ training samples requires $O(n^2)$ full circuit evaluations. At 30 qubits, each evaluation is already slow, and with hundreds of samples the total time is measured in days, not seconds.
+
+**The standard solution in QSVM research:** reduce the feature space to 2–4 dimensions before encoding. This project uses two strategies:
+
+- **Parts 2–4:** select the 2 raw features with the highest training-set variance. Features stay interpretable — they are real, named measurements.
+- **Part 5:** apply PCA, project onto the top 2 principal components, and use those as angle-encoding rotation angles. This is where PCA enters the project.
+          """)
     fmap_basic     = build_basic_feature_map(n_features)
     fmap_entangled = build_entangled_feature_map(n_features, reps=2)
 
@@ -248,38 +266,75 @@ def part4(qk_basic, qk_entangled,
 # ══════════════════════════════════════════════════════════════
 
 def part5(n_components: int = 2):
+    """
+    Part 5 is the ONLY place PCA is applied in this project.
+
+    Parts 2-4 used raw feature selection (top-2 by variance: worst area,
+    mean area).  Here we apply PCA to all 30 features, project onto the top
+    n_components principal components, and use those projections as rotation
+    angles — the textbook definition of angle embedding.
+    """
     print("\n" + "═" * 60)
     print("  PART 5 — Angle Embedding with PCA")
+    print("  (PCA introduced here for the first time)")
     print("═" * 60)
 
+    from sklearn.decomposition import PCA as _PCA
+
+    # Re-load and split identically to Parts 2-4 so comparisons are fair
     X, y, _, _ = load_dataset()
-
-    print(f"\n  Applying PCA → {n_components} components ...")
-    X_train, X_test, y_train, y_test, pca, scaler = preprocess(
-        X, y, n_components=n_components, apply_pca=True, max_train_samples=80
+    X_train_full, X_test_full, y_train_full, y_test_full, _, _ = preprocess(
+        X, y, n_components=n_components, apply_pca=False
     )
-    if len(X_test) > 40:
-        X_test, y_test = X_test[:40], y_test[:40]
 
-    print(f"  Explained variance: "
-          f"{pca.explained_variance_ratio_ * 100}")
-    print(f"  Total retained    : "
-          f"{pca.explained_variance_ratio_.sum() * 100:.1f}%")
+    # ── Apply PCA to the original 30-feature arrays ──────────
+    # We need the raw 30-feature split, so reload without feature selection
+    from sklearn.model_selection import train_test_split as _tts
+    X_tr30, X_te30, y_tr, y_te = _tts(
+        X, y, test_size=0.20, random_state=42, stratify=y
+    )
+
+    print(f"\n  Fitting PCA({n_components}) on {len(X_tr30)} training samples ...")
+    pca = _PCA(n_components=n_components, random_state=42)
+    X_tr_pca = pca.fit_transform(X_tr30)
+    X_te_pca = pca.transform(X_te30)
+
+    for i, (v, c) in enumerate(zip(
+        pca.explained_variance_ratio_ * 100,
+        np.cumsum(pca.explained_variance_ratio_) * 100
+    ), 1):
+        print(f"  PC{i}: {v:.2f}%  (cumulative: {c:.2f}%)")
+
+    # Subsample for quantum kernel speed
+    rng = np.random.default_rng(42)
+    idx = rng.choice(len(X_tr_pca), size=80, replace=False)
+    X_train = X_tr_pca[idx]
+    y_train = y_tr[idx]
+    X_test  = X_te_pca[:40]
+    y_test  = y_te[:40]
+
+    # Scale PCA components to [0, π] — they become the rotation angles
+    from sklearn.preprocessing import MinMaxScaler as _MMS
+    scaler = _MMS(feature_range=(0, np.pi))
+    X_train = scaler.fit_transform(X_train)
+    X_test  = scaler.transform(X_test)
 
     plot_pca_variance(pca, "results/pca_variance.png")
     plot_pca_scatter(X_train, y_train, "results/pca_scatter.png")
 
-    # ── Angle-embedding circuit = BasicFeatureMap ──
-    # (PCA features are already scaled to [0,π] = valid rotation angles)
+    # ── Angle-embedding circuit ──────────────────────────────
+    # BasicFeatureMap: H → RZ(θ) → RX(θ) per qubit
+    # θᵢ = PCA component i, scaled to [0, π]
     print(f"\n  Building angle-embedding circuit ({n_components} qubits) ...")
     fmap_angle = build_basic_feature_map(n_components)
     draw_circuit(fmap_angle, X_train[0],
-                 "Angle Embedding Circuit  (PCA features as rotation angles)",
+                 f"Angle Embedding (Part 5)\n"
+                 f"PC1={X_train[0,0]:.3f} rad, PC2={X_train[0,1]:.3f} rad",
                  "results/circuit_angle_embedding.png")
 
     qk_angle = build_quantum_kernel(fmap_angle)
 
-    print("  Computing kernel matrices for angle-embedding QSVM ...")
+    print("  Computing kernel matrices ...")
     K_train = compute_kernel_matrix(qk_angle, X_train)
     _, K_test = compute_kernel_matrix(qk_angle, X_train, X_test)
 
@@ -290,31 +345,21 @@ def part5(n_components: int = 2):
                                      "QSVM-Angle(PCA)")
 
     print(f"""
-  Angle Embedding vs Part 4 QSVMs
+  Part 5 vs Part 4 — what changed
   ─────────────────────────────────
-  In Part 4, we used ALL 30 features reduced to 2 PCA components only for
-  circuit width, but the ZZFeatureMap still used the same 2-D data.
+  Parts 2-4 input: worst area, mean area (2 raw features, named measurements)
+  Part 5 input   : PC1, PC2 (projections onto directions of max variance)
 
-  Part 5 explicitly:
-    1. Runs PCA first to retain the top {n_components} components.
-    2. Scales each component to [0, π] to use as a rotation angle.
-    3. Applies BasicFeatureMap — each angle is literally a gate parameter.
+  PCA retains {pca.explained_variance_ratio_.sum()*100:.1f}% of total dataset variance.
+  Feature selection (Parts 2-4) uses just 2 of the 30 original features.
 
-  This is the textbook "angle embedding" approach.  It is interpretable
-  (each qubit directly represents a data axis) but limited — with only
-  {n_components} qubits there is no entanglement between features.
+  The circuit structure is identical (BasicFeatureMap).
+  The only difference is what each rotation angle represents.
 
-  Accuracy comparison:
-    QSVM-Basic (Part 4): see comparison_table.csv
-    QSVM-Angle (Part 5): {res_angle['accuracy']:.4f}
-
-  The angle-embedding QSVM tends to perform comparably or slightly below
-  the ZZFeatureMap because it lacks entanglement-based feature interaction.
-  However, it is far more circuit-efficient and noise-tolerant.
+  QSVM-Angle(PCA) accuracy: {res_angle['accuracy']:.4f}
 """)
 
     return res_angle
-
 
 # ══════════════════════════════════════════════════════════════
 # Entry Point
@@ -365,6 +410,21 @@ if __name__ == "__main__":
     )
 
     res_angle = part5(n_components=N_FEATURES)
+
+    # ── Export comparison_table_final.csv (Parts 4 + 5 combined) ──
+    rep_angle = res_angle["report"]
+    row_angle = {
+        "Model"    : res_angle["label"],
+        "Accuracy" : round(res_angle["accuracy"], 4),
+        "Precision": round(rep_angle["weighted avg"]["precision"], 4),
+        "Recall"   : round(rep_angle["weighted avg"]["recall"], 4),
+        "F1-Score" : round(rep_angle["weighted avg"]["f1-score"], 4),
+    }
+    df_final = pd.concat(
+        [df, pd.DataFrame([row_angle])], ignore_index=True
+    ).sort_values("Accuracy", ascending=False).reset_index(drop=True)
+    df_final.to_csv("results/comparison_table_final.csv", index=False)
+    print("  Saved → results/comparison_table_final.csv")
 
     # ── Final summary ──────────────────────────────────────────
     print("\n" + "═" * 60)
