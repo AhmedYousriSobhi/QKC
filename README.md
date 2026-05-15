@@ -13,17 +13,20 @@ This repository implements quantum kernel methods for binary classification on t
 
 ```
 quantum-kernel-classification/
-├── main.py                   ← Run this to execute all five parts
+├── main.py                             ← Run this to execute all five parts
 ├── requirements.txt
 ├── src/
-│   ├── data_utils.py         ← Dataset loading, PCA, scaling
-│   ├── feature_maps.py       ← BasicFeatureMap + ZZFeatureMap
-│   ├── kernel_computation.py ← FidelityQuantumKernel wrapper
-│   ├── classifiers.py        ← QSVM + classical SVM training & evaluation
-│   └── visualization.py      ← All plotting functions
-├── results/                  ← Generated figures and CSVs (auto-created)
+│   ├── data_utils.py                   ← Dataset loading, PCA, scaling
+│   ├── feature_maps.py                 ← BasicFeatureMap + ZZFeatureMap
+│   ├── kernel_computation.py           ← FidelityQuantumKernel wrapper
+│   ├── classifiers.py                  ← QSVM + classical SVM training & evaluation
+│   └── visualization.py                ← All plotting functions
+├── results/                            ← Generated figures and CSVs (auto-created)
+├── notebook/                           ← Walk through the project interactively
+│   ├── quantum_kernel_classification   ← Python Notebook to run interactively
+│   ├── results/                        ← Generated figures and CSVs (auto-created)
 └── report/
-    └── report.md             ← Written project report
+    └── report.md                       ← Written project report
 ```
 
 ---
