@@ -16,10 +16,6 @@ env/
 .ipynb_checkpoints/
 *.ipynb_checkpoints
 
-# Results (generated at runtime — do not commit large PNGs)
-results/*.png
-results/*.csv
-
 # OS
 .DS_Store
 Thumbs.db

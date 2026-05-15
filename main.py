@@ -148,10 +148,10 @@ Beyond memory, the kernel matrix for $n$ training samples requires $O(n^2)$ full
     print("\n  Drawing circuits ...")
     draw_circuit(fmap_basic, sample,
                  "Basic Feature Map  (H → RZ → RX, no entanglement)",
-                 "results/circuit_basic.png")
+                 "results/part-2-circuit_basic.png")
     draw_circuit(fmap_entangled, sample,
                  "Entangled Feature Map  (ZZFeatureMap, 2 reps)",
-                 "results/circuit_entangled.png")
+                 "results/part-2-circuit_entangled.png")
 
     return fmap_basic, fmap_entangled
 
@@ -184,12 +184,12 @@ def part3(fmap_basic, fmap_entangled, X_train, y_train):
     plot_kernel_heatmap(K_basic_train, y_train,
                         "Quantum Kernel Matrix — Basic Feature Map\n"
                         "(first 15 samples, sorted by class; red dashed = class boundary)",
-                        "results/heatmap_basic.png", n_show=15)
+                        "results/part-3-heatmap_basic.png", n_show=15)
 
     plot_kernel_heatmap(K_zz_train, y_train,
                         "Quantum Kernel Matrix — ZZFeatureMap\n"
                         "(first 15 samples, sorted by class; red dashed = class boundary)",
-                        "results/heatmap_zz.png", n_show=15)
+                        "results/part-3-heatmap_zz.png", n_show=15)
 
     print("""
   Heatmap interpretation
@@ -250,13 +250,13 @@ def part4(qk_basic, qk_entangled,
     df = build_comparison_table(quantum_results, classical_results)
     print("\n  ── Full Comparison Table ──")
     print(df.to_string(index=False))
-    df.to_csv("results/comparison_table.csv", index=False)
-    print("  Saved → results/comparison_table.csv")
+    df.to_csv("results/part-4-comparison_table.csv", index=False)
+    print("  Saved → results/part-4-comparison_table.csv")
 
     # ── 4f. Plots ──
-    plot_comparison_bar(df, "results/comparison_bar.png")
+    plot_comparison_bar(df, "results/part-4-comparison_bar.png")
     plot_confusion_matrices(quantum_results + classical_results,
-                            "results/confusion_matrices.png")
+                            "results/part-4-confusion_matrices.png")
 
     return quantum_results, classical_results, df
 
@@ -319,8 +319,8 @@ def part5(n_components: int = 2):
     X_train = scaler.fit_transform(X_train)
     X_test  = scaler.transform(X_test)
 
-    plot_pca_variance(pca, "results/pca_variance.png")
-    plot_pca_scatter(X_train, y_train, "results/pca_scatter.png")
+    plot_pca_variance(pca, "results/part-5-pca_variance.png")
+    plot_pca_scatter(X_train, y_train, "results/part-5-pca_scatter.png")
 
     # ── Angle-embedding circuit ──────────────────────────────
     # BasicFeatureMap: H → RZ(θ) → RX(θ) per qubit
@@ -330,7 +330,7 @@ def part5(n_components: int = 2):
     draw_circuit(fmap_angle, X_train[0],
                  f"Angle Embedding (Part 5)\n"
                  f"PC1={X_train[0,0]:.3f} rad, PC2={X_train[0,1]:.3f} rad",
-                 "results/circuit_angle_embedding.png")
+                 "results/part-5-circuit_angle_embedding.png")
 
     qk_angle = build_quantum_kernel(fmap_angle)
 
@@ -423,8 +423,8 @@ if __name__ == "__main__":
     df_final = pd.concat(
         [df, pd.DataFrame([row_angle])], ignore_index=True
     ).sort_values("Accuracy", ascending=False).reset_index(drop=True)
-    df_final.to_csv("results/comparison_table_final.csv", index=False)
-    print("  Saved → results/comparison_table_final.csv")
+    df_final.to_csv("results/part-5-comparison_table_final.csv", index=False)
+    print("  Saved → results/part-5-comparison_table_final.csv")
 
     # ── Final summary ──────────────────────────────────────────
     print("\n" + "═" * 60)
