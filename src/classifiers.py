@@ -22,7 +22,7 @@ from sklearn.metrics import (
 # 1. Quantum SVM (precomputed kernel)
 # ──────────────────────────────────────────────────────────────
 
-def train_quantum_svm(K_train, y_train, C_values=None):
+def train_quantum_svm(K_train, y_train, C_values=None, random_state: int = 42):
     """
     Train an SVM on a precomputed quantum kernel matrix.
 
@@ -47,7 +47,7 @@ def train_quantum_svm(K_train, y_train, C_values=None):
     if C_values is None:
         C_values = [0.01, 0.1, 1.0, 10.0, 100.0]
 
-    cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+    cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=random_state)
     param_grid = {"C": C_values}
 
     svm = SVC(kernel="precomputed")
@@ -80,7 +80,7 @@ CLASSICAL_KERNELS = {
 }
 
 
-def train_classical_svms(X_train, y_train, C_values=None):
+def train_classical_svms(X_train, y_train, C_values=None, random_state: int = 42):
     """
     Train RBF, polynomial, and linear SVMs with grid-searched C.
 
@@ -89,7 +89,7 @@ def train_classical_svms(X_train, y_train, C_values=None):
     if C_values is None:
         C_values = [0.01, 0.1, 1.0, 10.0, 100.0]
 
-    cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+    cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=random_state)
     results = {}
 
     for name, kwargs in CLASSICAL_KERNELS.items():

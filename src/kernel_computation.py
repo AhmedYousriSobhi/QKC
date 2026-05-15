@@ -21,7 +21,7 @@ from qiskit_machine_learning.state_fidelities import ComputeUncompute
 # 1. Build kernel object
 # ──────────────────────────────────────────────────────────────
 
-def build_quantum_kernel(feature_map):
+def build_quantum_kernel(feature_map, seed: int = 42):
     """
     Wrap a feature map circuit in a FidelityQuantumKernel.
 
@@ -40,7 +40,7 @@ def build_quantum_kernel(feature_map):
     -------
     qk : FidelityQuantumKernel
     """
-    sampler = StatevectorSampler()
+    sampler = StatevectorSampler(seed=seed)
     fidelity = ComputeUncompute(sampler=sampler)
     qk = FidelityQuantumKernel(
         feature_map=feature_map,

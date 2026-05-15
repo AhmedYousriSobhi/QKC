@@ -3,6 +3,7 @@ main.py
 ───────
 Quantum Kernel Classification Project
 
+
 Run this file to execute all five project parts in sequence:
 
   Part 1: Dataset summary and theoretical notes
@@ -20,9 +21,16 @@ Usage:
 import os
 import sys
 import time
+import random
 import warnings
 import numpy as np
 import pandas as pd
+
+SEED = 42
+
+# ── Global random seed — guarantees identical results on every run ──
+random.seed(SEED)
+np.random.seed(SEED)
 
 warnings.filterwarnings("ignore")
 os.makedirs("results", exist_ok=True)
@@ -165,8 +173,8 @@ def part3(fmap_basic, fmap_entangled, X_train, y_train):
     print("  PART 3 — Quantum Kernel Computation")
     print("═" * 60)
 
-    qk_basic     = build_quantum_kernel(fmap_basic)
-    qk_entangled = build_quantum_kernel(fmap_entangled)
+    qk_basic     = build_quantum_kernel(fmap_basic, seed=SEED)
+    qk_entangled = build_quantum_kernel(fmap_entangled, seed=SEED)
 
     print("\n  Computing BasicFM kernel matrix ...")
     t0 = time.time()
@@ -216,10 +224,21 @@ def part3(fmap_basic, fmap_entangled, X_train, y_train):
 
 def part4(qk_basic, qk_entangled,
           K_basic_train, K_zz_train,
-          X_train, X_test, y_train, y_test):
+          X_train, X_test, y_train, y_test,
+          X_train_full=None, X_test_full=None,
+          y_train_full=None, y_test_full=None):
+    """
+    X_train / y_train     : 80-sample quantum subset (for QSVM kernel computation)
+    X_train_full / y_train_full : full training set  (for classical SVMs — no sample cap)
+    """
     print("\n" + "═" * 60)
     print("  PART 4 — SVM Training and Evaluation")
     print("═" * 60)
+
+    # Fall back to quantum subset if full arrays not supplied
+    if X_train_full is None:
+        X_train_full, X_test_full = X_train, X_test
+        y_train_full, y_test_full = y_train, y_test
 
     # ── 4a. Compute test kernel matrices ──
     print("\n  Computing test kernels ...")
@@ -228,8 +247,8 @@ def part4(qk_basic, qk_entangled,
 
     # ── 4b. Train quantum SVMs ──
     print("\n  Training Quantum SVMs ...")
-    model_basic, C_basic, _ = train_quantum_svm(K_basic_train, y_train)
-    model_zz,    C_zz,    _ = train_quantum_svm(K_zz_train,    y_train)
+    model_basic, C_basic, _ = train_quantum_svm(K_basic_train, y_train, random_state=SEED)
+    model_zz,    C_zz,    _ = train_quantum_svm(K_zz_train,    y_train, random_state=SEED)
     print(f"  BasicFM best C     = {C_basic}")
     print(f"  ZZFeatureMap best C = {C_zz}")
 
@@ -240,10 +259,11 @@ def part4(qk_basic, qk_entangled,
                                      "QSVM-ZZ")
 
     # ── 4d. Train and evaluate classical SVMs ──
-    print("\n  Training Classical SVMs ...")
-    classical_models = train_classical_svms(X_train, y_train)
+    # Classical SVMs use the full training set — no O(n²) circuit cost.
+    print("\n  Training Classical SVMs (full training set) ...")
+    classical_models = train_classical_svms(X_train_full, y_train_full, random_state=SEED)
     print("\n  Evaluating Classical SVMs ...")
-    classical_results = evaluate_classical_svms(classical_models, X_test, y_test)
+    classical_results = evaluate_classical_svms(classical_models, X_test_full, y_test_full)
 
     # ── 4e. Comparison table ──
     quantum_results = [res_basic, res_zz]
@@ -291,11 +311,11 @@ def part5(n_components: int = 2):
     # We need the raw 30-feature split, so reload without feature selection
     from sklearn.model_selection import train_test_split as _tts
     X_tr30, X_te30, y_tr, y_te = _tts(
-        X, y, test_size=0.20, random_state=42, stratify=y
+        X, y, test_size=0.20, random_state=SEED, stratify=y
     )
 
     print(f"\n  Fitting PCA({n_components}) on {len(X_tr30)} training samples ...")
-    pca = _PCA(n_components=n_components, random_state=42)
+    pca = _PCA(n_components=n_components, random_state=SEED)
     X_tr_pca = pca.fit_transform(X_tr30)
     X_te_pca = pca.transform(X_te30)
 
@@ -306,7 +326,7 @@ def part5(n_components: int = 2):
         print(f"  PC{i}: {v:.2f}%  (cumulative: {c:.2f}%)")
 
     # Subsample for quantum kernel speed
-    rng = np.random.default_rng(42)
+    rng = np.random.default_rng(SEED)
     idx = rng.choice(len(X_tr_pca), size=80, replace=False)
     X_train = X_tr_pca[idx]
     y_train = y_tr[idx]
@@ -332,13 +352,13 @@ def part5(n_components: int = 2):
                  f"PC1={X_train[0,0]:.3f} rad, PC2={X_train[0,1]:.3f} rad",
                  "results/part-5-circuit_angle_embedding.png")
 
-    qk_angle = build_quantum_kernel(fmap_angle)
+    qk_angle = build_quantum_kernel(fmap_angle, seed=SEED)
 
     print("  Computing kernel matrices ...")
     K_train = compute_kernel_matrix(qk_angle, X_train)
     _, K_test = compute_kernel_matrix(qk_angle, X_train, X_test)
 
-    model_angle, best_C, _ = train_quantum_svm(K_train, y_train)
+    model_angle, best_C, _ = train_quantum_svm(K_train, y_train, random_state=SEED)
     print(f"  Best C = {best_C}")
 
     res_angle = evaluate_quantum_svm(model_angle, K_test, y_test,
@@ -388,6 +408,7 @@ if __name__ == "__main__":
         max_train_samples=MAX_TRAIN_QUANTUM,
     )
     # Cap test size for quantum kernel (K_test is n_test × n_train)
+    np.random.seed(SEED)   # re-seed after preprocess subsampling
     if len(X_test) > 40:
         X_test, y_test = X_test[:40], y_test[:40]
     print(f"\n  Train size (quantum): {len(X_train)}  |  Test size: {len(X_test)}")
@@ -403,10 +424,21 @@ if __name__ == "__main__":
         fmap_basic, fmap_entangled, X_train, y_train
     )
 
+    # Full preprocessed arrays for classical SVMs (no sample cap)
+    X_tr_full2, X_te_full2, y_tr_full2, y_te_full2, _, scaler_full = preprocess(
+        X_raw, y_raw,
+        n_components=N_FEATURES,
+        test_size=TEST_SIZE,
+        apply_pca=False,
+        max_train_samples=None,   # no cap for classical SVMs
+    )
+
     quantum_results, classical_results, df = part4(
         qk_basic, qk_entangled,
         K_basic_train, K_zz_train,
         X_train, X_test, y_train, y_test,
+        X_train_full=X_tr_full2, X_test_full=X_te_full2,
+        y_train_full=y_tr_full2, y_test_full=y_te_full2,
     )
 
     res_angle = part5(n_components=N_FEATURES)
